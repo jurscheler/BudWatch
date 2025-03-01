@@ -4,8 +4,8 @@ import pyodbc
 from datetime import datetime
 
 token = ""
-email = "rurscheler@gmail.com"
-password = "Asd123!."
+email = "..."
+password = "..."
 
 # Define the connection string
 conn_str = (
