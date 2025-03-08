@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BudWatch - Sensor Data</title>
+</head>
+<body>
+    <h2>View Sensor Graph</h2>
+    <form action="/graph" method="get" onsubmit="updateFormAction(this)">
+        <label for="sensorid">Select Sensor ID:</label>
+        <select name="sensorid" id="sensorid">
+            {% for sensorid in sensor_ids %}
+            <option value="{{ sensorid }}" {% if sensorid == default_sensor_id %}selected{% endif %}>{{ sensorid }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">View Graph</button>
+    </form>
+
+    <script>
+        function updateFormAction(form) {
+            const sensorid = form.sensorid.value;
+            form.action = `/graph/${sensorid}`;  // Update the form action to include sensorid in the path
+        }
+    </script>
+    
+    <h1>Sensor Data for {{ default_sensor_id }}</h1>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Sensor ID</th>
+                <th>Timestamp</th>
+                <th>Temperature (°C)</th>
+                <th>Humidity (%)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in default_sensor_data %}
+            <tr>
+                <td>{{ row[0] }}</td>  <!-- id -->
+                <td>{{ row[1] }}</td>  <!-- sensorid -->
+                <td>{{ row[2] }}</td>  <!-- date -->
+                <td>{{ "%.1f"|format(row[3]) }}</td>  <!-- temperature_c (formatted to 1 decimal place) -->
+                <td>{{ row[4] }}</td>  <!-- humidity -->
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
