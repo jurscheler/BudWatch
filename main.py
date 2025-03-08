@@ -1,19 +1,30 @@
 import requests
 import time
+import os
 import pyodbc
 from datetime import datetime
 
-token = ""
-email = "..."
-password = "..."
+# Define the credentials for the SensorPush Cloud in the env variables BUDWATCH_EMAIL and BUDWATCH_PASSWORD
+# E.g. via PS: [System.Environment]::SetEnvironmentVariable('BUDWATCH_EMAIL', 'myemail', [System.EnvironmentVariableTarget]::User)
 
-# Define the connection string
+# Read the environment variable
+sp_email = os.getenv('BUDWATCH_EMAIL')
+sp_password = os.getenv('BUDWATCH_PASSWORD')
+
+server = os.getenv('BUDWATCH_SQL_SERVER', 'localhost')  # Default to 'localhost' if not set
+database = os.getenv('BUDWATCH_SQL_DATABASE', 'BudWatch')  # Default to 'BudWatch' if not set
+username = os.getenv('BUDWATCH_SQL_USERNAME', 'admin')  # Default to 'admin' if not set
+password = os.getenv('BUDWATCH_SQL_PASSWORD')
+
+token = ""
+
+# Construct the connection string using environment variables
 conn_str = (
-    "DRIVER={ODBC Driver 17 for SQL Server};"
-    "SERVER=localhost;"  # Replace with your server name
-    "DATABASE=BudWatch;"  # Replace with your database name
-    "UID=admin;"  # Replace with your username
-    "PWD=957Bruce;"  # Replace with your password
+    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+    f"SERVER={server};"
+    f"DATABASE={database};"
+    f"UID={username};"
+    f"PWD={password};"
 )
 
 def authorize():
@@ -22,7 +33,7 @@ def authorize():
         # Use the 'json' parameter to send JSON data in the request body
         response = requests.post(
             "https://api.sensorpush.com/api/v1/oauth/authorize",
-            json={"email": email, "password": password}
+            json={"email": sp_email, "password": sp_password}
         )
 
         # Check if the request was successful
@@ -106,7 +117,7 @@ def main():
     # Authorize
     authorize()
 
-    # Forever, every 10 seconds 
+    # Forever, every 1 minute 
     while True:
         # Fetch current data from all sensors
         sensor_data = fetch_data()
@@ -126,8 +137,8 @@ def main():
                     else:
                         print("Missing data in sensor reading. Skipping.")
 
-        # Wait for 10 seconds before fetching data again
-        time.sleep(10)
+        # Wait for 60 seconds before fetching data again
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()
