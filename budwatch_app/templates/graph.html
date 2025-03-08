@@ -7,10 +7,10 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <h1>Sensor {{ sensorid }} - Temperature and Humidity</h1>
+    <h1>Sensor {{ data[0][3] if data else 'N/A' }} - Temperature and Humidity</h1>
     <canvas id="sensorChart" width="800" height="400"></canvas>
     <script>
-        const sensorId = "{{ sensorid }}";  // Treat sensorid as a string
+        const sensorId = "{{ sensorid }}";  // Ensure sensorid is treated as a string
         fetch(`/api/sensor/${sensorId}`)
             .then(response => response.json())
             .then(data => {
@@ -45,9 +45,6 @@
                         }
                     }
                 });
-            })
-            .catch(error => {
-                console.error('Error fetching sensor data:', error);
             });
     </script>
 </body>

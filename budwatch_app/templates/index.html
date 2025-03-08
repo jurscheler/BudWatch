@@ -4,45 +4,78 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BudWatch - Sensor Data</title>
+    <script>
+        // Function to update the table when the dropdown changes
+        function updateTable() {
+            const sensorid = document.getElementById('sensorid').value;
+
+            // Fetch new data from the server
+            fetch(`/api/sensor/${sensorid}`)
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = document.getElementById('sensorTableBody');
+                    tableBody.innerHTML = '';  // Clear the existing table rows
+
+                    // Populate the table with new data
+                    data.timestamps.forEach((timestamp, index) => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${index + 1}</td>
+                            <td>${timestamp}</td>
+                            <td>${data.temperature[index]}</td>
+                            <td>${data.humidity[index]}</td>
+                        `;
+                        tableBody.appendChild(row);
+                    });
+
+                    // Update the table heading with the selected sensor name
+                    const tableHeading = document.getElementById('tableHeading');
+                    tableHeading.textContent = `Latest Data for ${data.sensor_name || 'N/A'}`;
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
+
+        // Attach the updateTable function to the dropdown's change event
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropdown = document.getElementById('sensorid');
+            dropdown.addEventListener('change', updateTable);
+        });
+    </script>
 </head>
 <body>
-    <h2>View Sensor Graph</h2>
-    <form action="/graph" method="get" onsubmit="updateFormAction(this)">
-        <label for="sensorid">Select Sensor ID:</label>
+    <h1>Sensor Data</h1>
+
+    <!-- Dropdown to select sensor -->
+    <h2>View Sensor Data</h2>
+    <form>
+        <label for="sensorid">Select Sensor:</label>
         <select name="sensorid" id="sensorid">
-            {% for sensorid in sensor_ids %}
-            <option value="{{ sensorid }}" {% if sensorid == default_sensor_id %}selected{% endif %}>{{ sensorid }}</option>
+            {% for sensor in sensors %}
+            <option value="{{ sensor.sensorid }}">{{ sensor.name }}</option>
             {% endfor %}
         </select>
-        <button type="submit">View Graph</button>
+        <!-- Button to view graph -->
+        <button type="submit" formaction="/graph">View Graph</button>
     </form>
 
-    <script>
-        function updateFormAction(form) {
-            const sensorid = form.sensorid.value;
-            form.action = `/graph/${sensorid}`;  // Update the form action to include sensorid in the path
-        }
-    </script>
-    
-    <h1>Sensor Data for {{ default_sensor_id }}</h1>
+    <!-- Table to display sensor data -->
+    <h2 id="tableHeading">Latest Data for {{ default_sensor[1] if default_sensor else 'N/A' }}</h2>
     <table border="1">
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Sensor ID</th>
-                <th>Timestamp</th>
+                <th>Date</th>
                 <th>Temperature (°C)</th>
                 <th>Humidity (%)</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="sensorTableBody">
             {% for row in default_sensor_data %}
             <tr>
-                <td>{{ row[0] }}</td>  <!-- id -->
-                <td>{{ row[1] }}</td>  <!-- sensorid -->
-                <td>{{ row[2] }}</td>  <!-- date -->
-                <td>{{ "%.1f"|format(row[3]) }}</td>  <!-- temperature_c (formatted to 1 decimal place) -->
-                <td>{{ row[4] }}</td>  <!-- humidity -->
+                <td>{{ loop.index }}</td>  <!-- Row number -->
+                <td>{{ row[2] }}</td>  <!-- Date -->
+                <td>{{ row[3] }}</td>  <!-- Temperature -->
+                <td>{{ row[4] }}</td>  <!-- Humidity -->
             </tr>
             {% endfor %}
         </tbody>

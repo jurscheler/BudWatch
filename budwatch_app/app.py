@@ -17,7 +17,7 @@ def get_db_connection():
     return pyodbc.connect(CONNECTION_STRING)
 
 def fahrenheit_to_celsius(f):
-    return (f - 32) * 5 / 9
+    return round((f - 32) * 5 / 9, 1)  # Round to 1 decimal place
 
 def convert_gmt_to_est(gmt_time):
     """
@@ -44,18 +44,25 @@ def index():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Fetch unique sensor IDs
-    cursor.execute('SELECT DISTINCT sensorid FROM sensor_data ORDER BY sensorid')
-    sensor_ids = [row.sensorid for row in cursor.fetchall()]  # Access by column name
+    # Fetch sensor IDs and names from the sensors table
+    cursor.execute('SELECT sensorid, name FROM sensors ORDER BY name')
+    sensors = cursor.fetchall()  # List of (sensorid, name) tuples
 
     # Fetch data for the default sensor (first sensor in the list), ordered by date DESC
-    default_sensor_id = sensor_ids[0] if sensor_ids else None
-    if default_sensor_id:
-        cursor.execute('SELECT id, sensorid, date, temperature, humidity FROM sensor_data WHERE sensorid = ? ORDER BY date DESC', (default_sensor_id,))
+    default_sensor = sensors[0] if sensors else None
+    if default_sensor:
+        default_sensor_id, default_sensor_name = default_sensor
+        cursor.execute('''
+            SELECT sd.id, sd.sensorid, sd.date, sd.temperature, sd.humidity, s.name
+            FROM sensor_data sd
+            JOIN sensors s ON sd.sensorid = s.sensorid
+            WHERE sd.sensorid = ?
+            ORDER BY sd.date DESC
+        ''', (default_sensor_id,))
         default_sensor_data = cursor.fetchall()
         # Convert temperature to Celsius and GMT to EST
         default_sensor_data = [
-            (row.id, row.sensorid, convert_gmt_to_est(row.date), fahrenheit_to_celsius(row.temperature), row.humidity)
+            (row.id, row.sensorid, convert_gmt_to_est(row.date), fahrenheit_to_celsius(row.temperature), row.humidity, row.name)
             for row in default_sensor_data
         ]
     else:
@@ -63,36 +70,58 @@ def index():
 
     conn.close()
 
-    return render_template('index.html', sensor_ids=sensor_ids, default_sensor_id=default_sensor_id, default_sensor_data=default_sensor_data)
+    return render_template('index.html', sensors=sensors, default_sensor=default_sensor, default_sensor_data=default_sensor_data)
 
-@app.route('/graph/<sensorid>')
-def graph(sensorid):
+@app.route('/graph')
+def graph():
+    # Get the sensorid from the query parameters
+    sensorid = request.args.get('sensorid')
+    
+    # Validate the sensorid
+    if not sensorid:
+        return "Sensor ID is missing in the request.", 400
+
     # Fetch data for the selected sensor, ordered by date DESC
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT date, temperature, humidity FROM sensor_data WHERE sensorid = ? ORDER BY date DESC', (sensorid,))
+    cursor.execute('''
+        SELECT sd.date, sd.temperature, sd.humidity, s.name
+        FROM sensor_data sd
+        JOIN sensors s ON sd.sensorid = s.sensorid
+        WHERE sd.sensorid = ?
+        ORDER BY sd.date DESC
+    ''', (sensorid,))
     data = cursor.fetchall()
+    conn.close()
+
     # Convert temperature to Celsius and GMT to EST
     data = [
-        (convert_gmt_to_est(row.date), fahrenheit_to_celsius(row.temperature), row.humidity)
+        (convert_gmt_to_est(row.date), fahrenheit_to_celsius(row.temperature), row.humidity, row.name)
         for row in data
     ]
-    conn.close()
     return render_template('graph.html', sensorid=sensorid, data=data)
 
-@app.route('/api/sensor/<sensorid>')  # Treat sensorid as a string
+@app.route('/api/sensor/<sensorid>')
 def api_sensor_data(sensorid):
-    # API endpoint for fetching sensor data (used by Chart.js)
+    # Fetch data for the selected sensor
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT date, temperature, humidity FROM sensor_data WHERE sensorid = ?', (sensorid,))
+    cursor.execute('''
+        SELECT sd.date, sd.temperature, sd.humidity, s.name
+        FROM sensor_data sd
+        JOIN sensors s ON sd.sensorid = s.sensorid
+        WHERE sd.sensorid = ?
+        ORDER BY sd.date DESC
+    ''', (sensorid,))
     data = cursor.fetchall()
     conn.close()
-    # Format data for Chart.js
+
+    # Format data for the frontend
     result = {
         'timestamps': [convert_gmt_to_est(row.date).strftime('%Y-%m-%d %H:%M:%S') for row in data],  # Convert GMT to EST
-        'temperature': [fahrenheit_to_celsius(row.temperature) for row in data],
-        'humidity': [row.humidity for row in data]
+        'temperature': [round(fahrenheit_to_celsius(row.temperature), 1) for row in data],  # Round temperature to 1 decimal place
+        'humidity': [round(row.humidity, 1) for row in data],  # Round humidity to 1 decimal place
+        'sensor_name': data[0].name if data else None  # Include sensor name in the response
     }
     return jsonify(result)
 
