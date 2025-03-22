@@ -4,21 +4,16 @@ import os
 import pyodbc
 from datetime import datetime
 
-# Define the credentials for the SensorPush Cloud in the env variables BUDWATCH_EMAIL and BUDWATCH_PASSWORD
-# E.g. via PS: [System.Environment]::SetEnvironmentVariable('BUDWATCH_EMAIL', 'myemail', [System.EnvironmentVariableTarget]::User)
-
-# Read the environment variable
+# Environment variables setup remains the same
 sp_email = os.getenv('BUDWATCH_EMAIL')
 sp_password = os.getenv('BUDWATCH_PASSWORD')
 
-server = os.getenv('BUDWATCH_SQL_SERVER', 'localhost')  # Default to 'localhost' if not set
-database = os.getenv('BUDWATCH_SQL_DATABASE', 'BudWatch')  # Default to 'BudWatch' if not set
-username = os.getenv('BUDWATCH_SQL_USERNAME', 'admin')  # Default to 'admin' if not set
+server = os.getenv('BUDWATCH_SQL_SERVER', 'localhost')
+database = os.getenv('BUDWATCH_SQL_DATABASE', 'BudWatch')
+username = os.getenv('BUDWATCH_SQL_USERNAME', 'admin')
 password = os.getenv('BUDWATCH_SQL_PASSWORD')
 
 token = ""
-
-# Construct the connection string using environment variables
 conn_str = (
     f"DRIVER={{ODBC Driver 17 for SQL Server}};"
     f"SERVER={server};"
@@ -27,118 +22,120 @@ conn_str = (
     f"PWD={password};"
 )
 
+def get_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 def authorize():
     global token
     try:
-        # Use the 'json' parameter to send JSON data in the request body
         response = requests.post(
             "https://api.sensorpush.com/api/v1/oauth/authorize",
             json={"email": sp_email, "password": sp_password}
         )
 
-        # Check if the request was successful
         if response.status_code == 200:
-            # Get the JSON response and save to variable
             token = response.json().get("authorization")
-            print(f"Token: {token}")
-        else:
-            print(f"Error: {response.status_code}")
+            print(f"[{get_timestamp()}] Authorization successful. Token: {token[:15]}...")  # Truncate for security
+            return True
+        print(f"[{get_timestamp()}] Authorization failed: HTTP {response.status_code}")
+        return False
     
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred: {e}")
+        print(f"[{get_timestamp()}] Network error during authorization: {str(e)}")
+        return False
+    except Exception as e:
+        print(f"[{get_timestamp()}] Unexpected error in authorization: {str(e)}")
+        return False
 
 def fetch_data():
     global token
-    if not token:
-        print("No token available. Please authorize first.")
-        return None
-
     try:
-        headers = {
-            'Authorization': f'Bearer {token}'  # Assuming the API expects a Bearer token
-        }
-        print(f"headers: {headers}")
-        
-        # Use the 'json' parameter to send JSON data in the request body
+        if not token:
+            print(f"[{get_timestamp()}] No authorization token available")
+            return None
+
         response = requests.post(
             "https://api.sensorpush.com/api/v1/samples",
-            headers=headers,
-            json={"limit": 1}
+            headers={'Authorization': f'Bearer {token}'},
+            json={"limit": 1},
+            timeout=10
         )
 
-        # Check if the request was successful
         if response.status_code == 200:
-            # Get the JSON response
-            sensor_data = response.json()
-            print(f"Sensor Data: {sensor_data}")
-            return sensor_data
+            return response.json()
+        elif response.status_code == 401:
+            print(f"[{get_timestamp()}] Token expired or invalid")
+            token = None  # Force re-authorization
         else:
-            print(f"Error: {response.status_code}")
-            return None
-    
+            print(f"[{get_timestamp()}] API request failed: HTTP {response.status_code}")
+        return None
+
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred: {e}")
+        print(f"[{get_timestamp()}] Network error during data fetch: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"[{get_timestamp()}] Unexpected error in data fetch: {str(e)}")
         return None
 
 def save_data(sensorid, observed, temperature, humidity):
-    # Save to database
     try:
-        # Establish the connection
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-
-        # Convert the observed timestamp to a datetime object
         observed_datetime = datetime.strptime(observed, "%Y-%m-%dT%H:%M:%S.%fZ")
-
-        # SQL INSERT statement
-        insert_query = """
-        INSERT INTO sensor_data (sensorid, date, temperature, humidity)
-        VALUES (?, ?, ?, ?)
-        """
-
-        # Execute the query
-        cursor.execute(insert_query, sensorid, observed_datetime, temperature, humidity)
-
-        # Commit the transaction
-        conn.commit()
-        print("Data inserted successfully!")
-
+        with pyodbc.connect(conn_str) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO sensor_data (sensorid, date, temperature, humidity) VALUES (?, ?, ?, ?)",
+                    sensorid, observed_datetime, temperature, humidity
+                )
+                conn.commit()
+        # Added data details in success message
+        print(f"[{get_timestamp()}] Data saved | Sensor: {sensorid} | "
+              f"Time: {observed} | Temp: {temperature}°C | Humidity: {humidity}%")
+        return True
+    
     except pyodbc.Error as e:
-        print(f"An error occurred: {e}")
-
-    finally:
-        # Close the cursor and connection
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        print(f"[{get_timestamp()}] Database error: {str(e)}")
+        return False
+    except Exception as e:
+        print(f"[{get_timestamp()}] Unexpected error in save_data: {str(e)}")
+        return False
 
 def main():
-    # Authorize
-    authorize()
-
-    # Forever, every 1 minute 
+    # Initial authorization with retries
     while True:
-        # Fetch current data from all sensors
-        sensor_data = fetch_data()
+        if authorize():
+            break
+        print(f"[{get_timestamp()}] Retrying authorization in 60 seconds...")
+        time.sleep(60)
 
-        if sensor_data and "sensors" in sensor_data:
-            # Iterate through each sensor in the response
+    # Main monitoring loop
+    while True:
+        try:
+            sensor_data = fetch_data()
+            
+            if not sensor_data or "sensors" not in sensor_data:
+                print(f"[{get_timestamp()}] Invalid data format or empty response")
+                raise ConnectionError("Invalid API response")
+
+            data_saved = False
             for sensorid, readings in sensor_data["sensors"].items():
                 for reading in readings:
-                    # Extract relevant fields
-                    observed = reading.get("observed")
-                    temperature = reading.get("temperature")
-                    humidity = reading.get("humidity")
+                    if all(k in reading for k in ("observed", "temperature", "humidity")):
+                        if save_data(sensorid, **{k: reading[k] for k in ("observed", "temperature", "humidity")}):
+                            data_saved = True
 
-                    # Save data into sensor_data table of MS SQL database
-                    if observed and temperature and humidity:
-                        save_data(sensorid, observed, temperature, humidity)
-                    else:
-                        print("Missing data in sensor reading. Skipping.")
+            if not data_saved:
+                print(f"[{get_timestamp()}] No valid data processed in this cycle")
 
-        # Wait for 60 seconds before fetching data again
-        time.sleep(60)
+        except (ConnectionError, requests.exceptions.RequestException) as e:
+            print(f"[{get_timestamp()}] Network-related error: {str(e)}. Re-authenticating...")
+            if not authorize():
+                print(f"[{get_timestamp()}] Re-authorization failed. Will retry in next cycle")
+
+        except Exception as e:
+            print(f"[{get_timestamp()}] Unexpected error: {str(e)}. Restarting cycle...")
+
+        finally:
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
